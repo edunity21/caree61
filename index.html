@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>진로전담교사 심층면접 66문항</title>
+<meta name="description" content="2027. 중등 진로전담교사 선발 2차 전형(심층면접) 대비 — 제시문·하위질문·구간별 모범답안 연습 도구">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="style.css?v=14">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar__in">
+    <div class="brand">
+      <span class="brand__mark">면접</span>
+      <div class="brand__txt">
+        <h1 id="brandTitle">진로전담교사 심층면접</h1>
+        <p>2027. 중등 진로전담교사 선발 2차 전형 대비</p>
+      </div>
+    </div>
+    <div class="topbar__right">
+      <div class="progress">
+        <span class="progress__num" id="progressNum">0</span><span class="progress__den" id="progressDen">/–</span>
+        <span class="progress__label">연습 완료</span>
+      </div>
+      <button class="iconbtn" id="fsBtn" title="넓게 보기 (F)" aria-pressed="false">⛶ 넓게 보기</button>
+    </div>
+  </div>
+</header>
+
+<main class="shell">
+
+  <section class="list" id="listPane" aria-label="문항 목록">
+    <div class="filters">
+      <input type="search" id="search" class="search" placeholder="키워드로 찾기 (예: 고교학점제, 학부모)" autocomplete="off">
+      <div class="chips" id="gradeChips" role="group" aria-label="등급 선택">
+        <button class="chip is-on" data-grade="all">전체</button>
+        <button class="chip" data-grade="S">S 필수</button>
+        <button class="chip" data-grade="A">A 권장</button>
+        <button class="chip" data-grade="fresh">최신 반영</button>
+      </div>
+      <div class="chips chips--area" id="areaChips" role="group" aria-label="영역 선택"></div>
+    </div>
+    <ol class="cards" id="cards"></ol>
+    <p class="empty" id="empty" hidden>조건에 맞는 문항이 없습니다. 검색어나 필터를 바꿔 보십시오.</p>
+  </section>
+
+  <section class="detail" id="detailPane" aria-label="문항 상세">
+    <div class="detail__scroll" id="detailScroll">
+
+      <div class="welcome" id="welcome">
+        <p class="welcome__eyebrow">2차 전형 실시 계획 요약</p>
+        <h2 class="welcome__h">구상을 포함해 3분. 한 면접실에 한 문항, 위원은 다섯 분입니다.</h2>
+
+        <table class="exam" id="examTable"><tbody></tbody></table>
+
+        <p class="welcome__eyebrow" style="margin-top:26px">연습 방법</p>
+        <ul class="welcome__list">
+          <li><b>제시문 + 하위질문 3개</b> 구조의 <b id="welcomeCount">문항</b>입니다. <b>중·고 공통</b>으로 답할 수 있게 학교급을 나누어 서술했습니다. <b>239문항 원본을 전량 반영</b>했으며, 중복을 걷어 내고 실질 질문 단위로 통합했습니다. 모범답안은 <b>구상 40초를 빼고 2분 22초</b>에 맞춰 모두 같은 길이로 작성했습니다.</li>
+          <li><b>키워드와 모범답안은 가려져 있습니다.</b> 먼저 스스로 구상해 소리 내어 답한 뒤 열어 확인하십시오.</li>
+          <li><b>▶ 연속 재생</b>을 켜면 문항 낭독 → 모범답안 낭독 → 다음 문항으로 끊김 없이 자동 진행합니다. <b>왼쪽 필터로 좁힌 범위</b>만 돌므로, 오늘은 상담 영역만 듣는 식으로 쓸 수 있습니다.</li>
+          <li>왼쪽 영역 필터로 오늘 볼 범위를 좁혀 쓰십시오. 실전 타이머는 <b>3분</b>이 기본이고, <b>종료 30초 전에 한 번</b> 신호가 울립니다. 실제 전형의 타종과 같습니다.</li>
+          <li>답안에는 <b>학교명·교과명 등 신분이 드러나는 표현을 넣지 않았습니다.</b> 관리번호로 익명 평가하는 전형이므로, 경력은 직무 유형으로만 언급하십시오.</li>
+        </ul>
+        <div class="welcome__cta">
+          <button class="btn btn--solid" id="startBtn">1번 문항부터 시작</button>
+          <button class="btn" id="randomBtn2">무작위 한 문항</button>
+        </div>
+      </div>
+
+      <article class="q" id="q" hidden>
+        <button class="backlink" id="backBtn">← 목록</button>
+
+        <div class="q__head">
+          <div class="q__meta">
+            <span class="badge" id="qGrade">S</span>
+            <span class="q__kind" id="qKind"></span>
+            <span class="q__area" id="qArea"></span>
+          </div>
+          <h2 class="q__title"><span class="q__no" id="qNo">01</span><span id="qTitle"></span></h2>
+          <ul class="focus" id="qFocus"></ul>
+          <p class="q__fresh" id="qFresh" hidden></p>
+        </div>
+
+        <div class="prompt">
+          <p class="prompt__eyebrow">면접위원 제시문</p>
+          <p class="prompt__body" id="qPrompt"></p>
+        </div>
+
+        <ol class="subs" id="qSubs"></ol>
+
+        <div class="scoring">
+          <div class="scoring__col">
+            <p class="scoring__h">면접위원이 확인하는 것</p>
+            <ul class="scoring__list" id="qRubric"></ul>
+          </div>
+          <div class="scoring__col scoring__col--warn">
+            <p class="scoring__h scoring__h--warn">여기서 갈립니다</p>
+            <ul class="scoring__list" id="qPitfall"></ul>
+          </div>
+        </div>
+
+        <div class="tools">
+          <div class="tools__row">
+            <button class="btn btn--solid" id="readQ">🔊 문항 읽어주기</button>
+            <button class="btn" id="timerBtn">⏱ 3분 시작</button>
+            <select class="sel" id="thinkSec" aria-label="연습 시간">
+              <option value="180" selected>실전 3분</option>
+              <option value="40">구상 40초</option>
+              <option value="140">답변 2분 20초</option>
+            </select>
+            <select class="sel" id="rate" aria-label="읽기 속도">
+              <option value="0.85">0.85배</option>
+              <option value="1" selected>1.0배</option>
+              <option value="1.15">1.15배</option>
+              <option value="1.3">1.3배</option>
+              <option value="1.5">1.5배</option>
+            </select>
+            <select class="sel" id="voice" aria-label="낭독 음성">
+              <option value="">기본 음성</option>
+            </select>
+          </div>
+          <div class="timer" id="timer" hidden>
+            <div class="timer__bar"><span id="timerFill"></span></div>
+            <span class="timer__num" id="timerNum">3:00</span>
+          </div>
+
+          <div class="auto">
+            <button class="btn" id="autoBtn">▶ 연속 재생</button>
+            <select class="sel" id="autoScope" aria-label="연속 재생 범위">
+              <option value="qa" selected>문항 + 답안</option>
+              <option value="a">답안만</option>
+              <option value="q">문항만</option>
+            </select>
+            <label class="chk"><input type="checkbox" id="autoLoop"> 끝나면 처음부터</label>
+            <span class="auto__now" id="autoNow" aria-live="polite"></span>
+          </div>
+        </div>
+
+        <div class="hint">
+          <button class="hint__toggle" id="kwToggle" aria-expanded="false">핵심 키워드 보기</button>
+          <ul class="kw" id="qKw" hidden></ul>
+        </div>
+
+        <div class="answer">
+          <button class="answer__toggle" id="ansToggle" aria-expanded="false">모범답안 보기</button>
+          <div class="answer__body" id="ansBody" hidden>
+            <div class="ribbon" id="ribbon" aria-hidden="true"></div>
+            <p class="ribbon__cap">답변 발화 <b id="totalSec"></b> · 구상 40초를 더하면 3분 · 구간을 누르면 그 지점부터 읽습니다</p>
+            <div class="segs" id="segs"></div>
+            <div class="ev">
+              <p class="ev__h">인용할 수 있는 근거</p>
+              <ul class="ev__list" id="qEvidence"></ul>
+            </div>
+
+            <div class="answer__ctrl">
+              <button class="btn btn--solid" id="readA">🔊 모범답안 읽어주기</button>
+              <button class="btn" id="stopBtn">■ 정지</button>
+              <button class="btn" id="doneBtn">✓ 연습 완료</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="src" id="qSrc"></p>
+
+        <nav class="pager">
+          <button class="btn" id="prevBtn">← 이전</button>
+          <button class="btn" id="randomBtn">무작위</button>
+          <button class="btn" id="nextBtn">다음 →</button>
+        </nav>
+      </article>
+
+    </div>
+  </section>
+</main>
+
+<button class="zenexit" id="zenExit" hidden aria-label="넓게 보기 해제">⤡ 해제</button>
+
+<div class="speaking" id="speaking" hidden>
+  <span class="speaking__dot"></span><span id="speakingTxt">읽는 중</span>
+  <button class="speaking__stop" id="speakingStop">정지</button>
+</div>
+
+<script src="data.js?v=66-2"></script>
+<script src="app.js?v=16"></script>
+</body>
+</html>
