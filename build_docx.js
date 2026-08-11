@@ -1,4 +1,4 @@
-/* 진로전담교사 심층면접 DOCX 생성 — 문항 수는 questions.json 에서 그대로 따릅니다 */
+/* 진로전담교사 심층면접 · 61문항 DOCX 생성 */
 const fs = require("fs");
 const {
   Document, Packer, Paragraph, TextRun, PageBreak, AlignmentType,
@@ -7,9 +7,6 @@ const {
 } = require("docx");
 
 const ITEMS = JSON.parse(fs.readFileSync("questions.json", "utf8"));
-/* 숫자를 손으로 적어 두면 문항이 늘 때마다 표지와 파일 이름이 어긋납니다. */
-const N = ITEMS.length;
-const SPACED = String(N).split("").join(" ");
 
 const FONT = "맑은 고딕";
 const NAVY = "1F3A5F";
@@ -261,7 +258,7 @@ function cover() {
     P({ spacing: { before: 260, after: 0 }, alignment: AlignmentType.CENTER,
         children: [T("2차 심층면접 대비", { size: 44, bold: true, color: NAVY })] }),
     P({ spacing: { before: 90, after: 0 }, alignment: AlignmentType.CENTER,
-        children: [T(SPACED + " 문 항", { size: 62, bold: true, color: NAVY, characterSpacing: 40 })] }),
+        children: [T("6 1 문 항", { size: 62, bold: true, color: NAVY, characterSpacing: 40 })] }),
     P({ spacing: { before: 200, after: 0 }, alignment: AlignmentType.CENTER,
         border: { top: { style: BorderStyle.SINGLE, size: 6, color: BRASS } },
         children: [T("", { size: 2 })] }),
@@ -335,7 +332,7 @@ function cover() {
 
 const doc = new Document({
   creator: "진로전담교사 심층면접 대비",
-  title: "진로전담교사 심층면접 " + N + "문항",
+  title: "진로전담교사 심층면접 61문항",
   styles: { default: { document: { run: { font: FONT, size: 19, color: INK } } } },
   sections: [{
     properties: {
@@ -362,6 +359,6 @@ const doc = new Document({
 });
 
 Packer.toBuffer(doc).then((b) => {
-  fs.writeFileSync("진로전담교사_심층면접_" + N + "문항.docx", b);
-  console.log("작성 완료 ·", N, "문항 ·", (b.length / 1024 / 1024).toFixed(2), "MB");
+  fs.writeFileSync("진로전담교사_심층면접_67문항.docx", b);
+  console.log("작성 완료 ·", (b.length / 1024 / 1024).toFixed(2), "MB");
 });
