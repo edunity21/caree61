@@ -1,11 +1,11 @@
 /* ============================================================
-   진로전담교사 심층면접 67문항 — 동작
+   진로전담교사 심층면접 66문항 — 동작
    data.js 의 ITEMS / AREAS 를 읽어 목록·상세·낭독·타이머를 담당합니다.
    ============================================================ */
 (function () {
   "use strict";
 
-  var BUILD = "v15";
+  var BUILD = "v17";
   var $ = function (id) { return document.getElementById(id); };
   try { console.log("진로전담교사 심층면접 · build " + BUILD + " · " + ITEMS.length + "문항"); } catch (e) {}
   var state = { grade: "all", area: "all", q: "", cur: null, done: loadDone() };
@@ -23,8 +23,9 @@
 
   /* ── 낭독 ─────────────────────────────────────────── */
   var TTS = {
-    queue: [], idx: 0, on: false, rate: 1, voiceQ: null, voiceA: null,
-    onSeg: null, onDone: null, watch: null, parts: null, fromSeg: 0,
+    queue: [], idx: 0, on: false, gen: 0, cancelAt: 0, rate: 1, voiceQ: null, voiceA: null,
+    onSeg: null, onDone: null, watch: null, startWatch: null, keep: null,
+    parts: null, fromSeg: 0,
 
     pickVoices: function () {
       if (!window.speechSynthesis) return;
@@ -73,17 +74,59 @@
       return out;
     },
 
+    /* 한 구간의 예상 낭독 시간. 감시 타이머는 이 값을 넘길 때만 개입합니다. */
+    est: function (text) {
+      var r = Math.max(this.rate || 1, 0.5);
+      return Math.max(3500, (text.length / (4.2 * r)) * 1000 + 3500);
+    },
+
+    /* 재생 세대(gen)를 하나 올려, 이전 발화가 뒤늦게 돌려주는 onend·onerror 를
+       모두 무효로 만듭니다. 연속 재생이 두 갈래로 갈라져 겹쳐 읽히던 원인입니다. */
+    reset: function () {
+      this.gen++;
+      this.on = false;
+      this.onDone = null;
+      clearTimeout(this.watch);
+      clearTimeout(this.startWatch);
+      this.keepAlive(false);
+    },
+
+    /* 크롬은 resume() 이 지금 읽던 구간을 처음부터 다시 읽어 버리는 경우가 있습니다.
+       그래서 재생 중에는 건드리지 않고, 완전히 멎어 있을 때만 한 번 풀어 줍니다. */
+    keepAlive: function (on) {
+      var self = this;
+      if (this.keep) { clearInterval(this.keep); this.keep = null; }
+      if (!on || !window.speechSynthesis) return;
+      this.keep = setInterval(function () {
+        if (!self.on) { clearInterval(self.keep); self.keep = null; return; }
+        if (document.hidden) return;
+        try {
+          if (speechSynthesis.paused && !speechSynthesis.speaking) speechSynthesis.resume();
+        } catch (e) { /* noop */ }
+      }, 10000);
+    },
+
     /* parts: [{text, who:'q'|'a', seg:index|null}] */
     play: function (parts, onSeg, onDone) {
       if (!window.speechSynthesis) {
         alert("이 브라우저는 읽어주기를 지원하지 않습니다. 크롬이나 사파리 최신 버전을 사용해 주십시오.");
         return;
       }
-      this.stop();                       /* stop 이 onDone 을 지우므로 그 뒤에 설정합니다 */
+      var busy = false;
+      try { busy = speechSynthesis.speaking || speechSynthesis.pending; } catch (e) { /* noop */ }
+
+      this.reset();                      /* reset 이 onDone 을 지우므로 그 뒤에 설정합니다 */
+      if (busy) {
+        try { speechSynthesis.cancel(); } catch (e) { /* noop */ }
+        this.cancelAt = Date.now();
+      }
+      /* 취소 직후의 speak() 는 크롬에서 소리 없이 무시됩니다. 잠깐 두었다 시작합니다. */
+      var gap = (Date.now() - (this.cancelAt || 0)) < 400;
+
       this.parts = parts;
       this.onSeg = onSeg || null;
-      this.onDone = onDone || null;
-      var self = this;
+      this.onDone = (typeof onDone === "function") ? onDone : null;
+      var self = this, myGen = this.gen;
       this.queue = [];
       parts.forEach(function (p) {
         self.chunk(p.text).forEach(function (t, i, arr) {
@@ -92,49 +135,121 @@
       });
       this.idx = 0; this.on = true;
       showSpeaking(true);
-      this.next();
+      this.keepAlive(true);
+
+      /* 취소가 있었으면 조금 두었다 시작합니다 */
+      if (gap) setTimeout(function () { if (self.gen === myGen) self.next(); }, 180);
+      else this.next();
     },
 
     next: function () {
       if (!this.on) return;
+      var self = this, myGen = this.gen;
+
       if (this.idx >= this.queue.length) {          /* 자연 종료 — 완료 콜백을 넘겨 줍니다 */
         var done = this.onDone;
-        this.stop();
-        if (typeof done === "function") done();   /* 함수가 아닌 값이 들어와도 안전하게 */
+        this.finish();
+        if (typeof done === "function") done();
         return;
       }
-      var item = this.queue[this.idx], self = this, myIdx = this.idx, moved = false;
-      var u = new SpeechSynthesisUtterance(item.text);
-      u.lang = "ko-KR";
-      u.rate = this.rate;
-      u.pitch = item.who === "q" ? 0.95 : 1.02;
-      var v = item.who === "q" ? this.voiceQ : this.voiceA;
-      if (v) u.voice = v;
-      if (this.onSeg) this.onSeg(item.seg);
+
+      var item = this.queue[this.idx], myIdx = this.idx, moved = false, started = false;
+      var retried = false, holds = 0;
+
+      function talking() {
+        try { return speechSynthesis.speaking || speechSynthesis.pending; } catch (e) { return false; }
+      }
 
       function advance(delay) {
-        if (moved) return;
+        if (moved || self.gen !== myGen || !self.on) return;   /* 지난 재생의 신호는 버립니다 */
         moved = true;
         clearTimeout(self.watch);
+        clearTimeout(self.startWatch);
         self.idx = myIdx + 1;
-        setTimeout(function () { self.next(); }, delay);
+        setTimeout(function () { if (self.gen === myGen) self.next(); }, delay);
       }
-      u.onend = function () { advance(item.last ? 300 : 130); };
-      u.onerror = function () { advance(130); };
 
-      /* 안드로이드 크롬에서 낭독이 onend 없이 조용히 끊기는 경우가 있어,
-         예상 소요의 두 배가 지나면 다음 구간으로 넘깁니다. */
-      var est = (item.text.length / (5 * this.rate)) * 1000 + 4000;
-      this.watch = setTimeout(function () { if (self.on) advance(80); }, est);
+      /* 감시 타이머가 울려도 아직 말하는 중이면 기다립니다.
+         여기서 그냥 넘어가면 앞 구간과 뒤 구간이 겹쳐 들립니다. */
+      function onWatch() {
+        if (moved || self.gen !== myGen) return;
+        if (talking() && holds < 3) {
+          holds++;
+          self.watch = setTimeout(onWatch, 5000);
+          return;
+        }
+        if (talking()) { try { speechSynthesis.cancel(); } catch (e) { /* noop */ } }
+        advance(140);
+      }
 
-      setTimeout(function () { if (self.on) speechSynthesis.speak(u); }, 0);
+      function armWatch() {                 /* 실제로 말을 시작한 뒤부터 시간을 잽니다 */
+        started = true;
+        clearTimeout(self.startWatch);
+        clearTimeout(self.watch);
+        self.watch = setTimeout(onWatch, self.est(item.text));
+      }
+
+      function build() {
+        var u = new SpeechSynthesisUtterance(item.text);
+        u.lang = "ko-KR";
+        u.rate = self.rate;
+        u.pitch = item.who === "q" ? 0.95 : 1.02;
+        var v = item.who === "q" ? self.voiceQ : self.voiceA;
+        if (v) u.voice = v;
+        u.onstart = function () { if (self.gen === myGen) armWatch(); };
+        u.onend = function () { advance(item.last ? 260 : 110); };
+        u.onerror = function (e) {
+          var why = e && e.error;
+          if (why === "interrupted" || why === "canceled") return;  /* 우리가 멈춘 것입니다 */
+          advance(110);
+        };
+        return u;
+      }
+
+      if (this.onSeg) this.onSeg(item.seg);
+
+      /* 소리가 시작되지 않을 때만 다시 요청합니다.
+         같은 발화를 취소 없이 두 번 speak() 하면 브라우저 큐에 둘 다 남아
+         그 구간이 두 번 읽힙니다. 반드시 cancel() 로 숨은 것을 지운 뒤,
+         새 발화 객체로 한 번만 다시 겁니다. */
+      this.startWatch = setTimeout(function () {
+        if (self.gen !== myGen || started || moved) return;
+        if (talking()) { armWatch(); return; }     /* onstart 를 주지 않는 브라우저 */
+        if (retried) { advance(80); return; }
+        retried = true;
+        try { speechSynthesis.cancel(); } catch (e) { /* noop */ }
+        setTimeout(function () {
+          if (self.gen !== myGen || started || moved) return;
+          try { speechSynthesis.speak(build()); } catch (e) { /* noop */ }
+          self.startWatch = setTimeout(function () {
+            if (self.gen !== myGen || started || moved) return;
+            if (talking()) armWatch(); else advance(80);
+          }, 3200);
+        }, 140);
+      }, 2800);
+
+      /* 사파리는 사용자 조작과 같은 흐름에서 speak() 해야 소리가 납니다.
+         setTimeout 으로 미루지 않습니다. */
+      try { speechSynthesis.speak(build()); } catch (e) { advance(80); }
     },
 
+    /* 큐를 끝까지 읽고 스스로 끝난 경우. cancel() 을 부르지 않습니다 —
+       바로 뒤에 이어지는 다음 재생이 통째로 무시되는 원인이었습니다. */
+    finish: function () {
+      this.reset();
+      if (this.onSeg) this.onSeg(null);
+      showSpeaking(false);
+    },
+
+    /* 사용자·화면이 부르는 정지.
+       speaking 이 false 로 보여도 큐에 남아 있을 수 있으므로 반드시 취소합니다.
+       (이걸 건너뛰면 정지를 눌러도 남은 구간이 뒤늦게 터져 나옵니다.) */
     stop: function () {
-      this.on = false;
-      this.onDone = null;
-      clearTimeout(this.watch);
-      if (window.speechSynthesis) speechSynthesis.cancel();
+      this.reset();
+      if (window.speechSynthesis) {
+        try { speechSynthesis.cancel(); } catch (e) { /* noop */ }
+        this.cancelAt = Date.now();
+      }
       if (this.onSeg) this.onSeg(null);
       showSpeaking(false);
     }
@@ -335,7 +450,14 @@
           (a.sub ? '<span class="seg__sub">질문 ' + a.sub + '</span>' : '') +
         '</div><p class="seg__text"></p>';
       b.querySelector(".seg__text").textContent = a.text;
-      b.onclick = function () { readAnswer(i); };
+      b.onclick = function () {
+        if (Auto.on) {                  /* 연속 재생 중이면 그 구간부터 이어 갑니다 */
+          autoLabel(it, "모범답안");
+          readAnswer(i, function () { if (Auto.on) autoNext(); });
+        } else {
+          readAnswer(i);
+        }
+      };
       segs.appendChild(b);
     });
 
@@ -415,7 +537,7 @@
   }
   var AUTO_OK = ensureAutoBar();
 
-  var Auto = { on: false, scope: "qa", loop: false };
+  var Auto = { on: false, scope: "qa", loop: false, step: 0 };
   var wakeLock = null;
 
   function wakeOn() {                       /* 낭독 중 화면이 꺼지면 음성이 끊기므로 */
@@ -432,7 +554,12 @@
     try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) { /* noop */ }
   }
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible" && Auto.on) wakeOn();
+    if (document.visibilityState !== "visible") return;
+    if (Auto.on) wakeOn();
+    /* 탭이 가려진 동안 크롬이 음성을 일시정지해 둔 경우를 풀어 줍니다. */
+    if (TTS.on && window.speechSynthesis) {
+      try { if (speechSynthesis.paused) speechSynthesis.resume(); } catch (e) { /* noop */ }
+    }
   });
 
   function autoPaint() {
@@ -455,6 +582,7 @@
   function autoStop() {
     if (typeof Auto === "undefined" || !Auto || !Auto.on) return;
     Auto.on = false;
+    Auto.step++;
     TTS.stop();
     wakeOff();
     if ($("speakingTxt")) $("speakingTxt").textContent = "읽는 중";
@@ -477,16 +605,22 @@
     autoRun();
   }
 
+  /* 낭독이 끝났다는 신호가 늦게 두 번 들어와도 한 번만 넘어가도록,
+     단계마다 번호를 붙여 지난 단계의 신호는 버립니다. */
+  function autoStepGuard(fn) {
+    var my = ++Auto.step;
+    return function () { if (Auto.on && Auto.step === my) fn(); };
+  }
+
   function autoRun() {
     var it = state.cur;
     if (!Auto.on || !it) return;
     var doQ = Auto.scope !== "a", doA = Auto.scope !== "q";
     if (doQ) {
       autoLabel(it, "문항");
-      readQuestion(function () {
-        if (!Auto.on) return;
+      readQuestion(autoStepGuard(function () {
         if (doA) autoPlayAnswer(); else autoNext();
-      });
+      }));
     } else {
       autoPlayAnswer();
     }
@@ -496,11 +630,12 @@
     var it = state.cur;
     if (!Auto.on || !it) return;
     autoLabel(it, "모범답안");
-    readAnswer(0, function () { if (Auto.on) autoNext(); });
+    readAnswer(0, autoStepGuard(function () { autoNext(); }));
   }
 
   function autoNext() {
-    if (!Auto.on) return;
+    if (!Auto.on || !state.cur) return;
+    Auto.step++;                                  /* 이 시점 이후의 지난 신호는 무효 */
     var list = filtered();
     if (!list.length) { autoStop(); return; }
     var i = list.findIndex(function (x) { return x.no === state.cur.no; });
@@ -509,13 +644,15 @@
     if (n >= list.length) {
       if (!Auto.loop) {
         Auto.on = false; wakeOff(); autoPaint();
+        if ($("speakingTxt")) $("speakingTxt").textContent = "읽는 중";
         if ($("autoNow")) $("autoNow").textContent = "연속 재생을 마쳤습니다 · " + list.length + "문항";
         return;
       }
       n = 0;
     }
     openedByAuto = true; open(list[n]); openedByAuto = false;
-    setTimeout(function () { autoRun(); }, 450);
+    var my = Auto.step;
+    setTimeout(function () { if (Auto.on && Auto.step === my) autoRun(); }, 500);
   }
 
   function saveAutoPrefs() {
@@ -569,8 +706,9 @@
     $("qKw").hidden = false; this.setAttribute("aria-expanded", "true");
   };
   $("ansToggle").onclick = function () { showAnswer(); };
-  $("readQ").onclick = function () { readQuestion(); };   /* 이벤트가 onDone 으로 새지 않게 */
-  $("readA").onclick = function () { readAnswer(0); };
+  /* readQuestion 을 그대로 넘기면 클릭 이벤트가 완료 콜백 자리에 들어가 오류가 납니다. */
+  $("readQ").onclick = function () { autoStop(); readQuestion(); };
+  $("readA").onclick = function () { autoStop(); readAnswer(0); };
   $("stopBtn").onclick = function () { autoStop(); TTS.stop(); };
   $("speakingStop").onclick = function () { autoStop(); TTS.stop(); };
   function applyVoice() {
@@ -582,7 +720,7 @@
   }
   function restartSpeech() {
     if (!TTS.on || !TTS.parts) return;
-    var parts = TTS.parts, done = (typeof TTS.onDone === "function") ? TTS.onDone : null;
+    var parts = TTS.parts, done = TTS.onDone;
     var seg = TTS.queue[TTS.idx] ? TTS.queue[TTS.idx].seg : null;
     var from = 0;
     if (seg !== null) {
@@ -704,10 +842,25 @@
     if (e.key === "ArrowLeft") move(-1);
     if (e.key === "Escape") { autoStop(); TTS.stop(); if (isZen()) { exitFull(); setZen(false); } }
     if (e.key === "f" || e.key === "F") toggleFull();
-    if (e.key === " " && state.cur) { e.preventDefault(); readQuestion(); }
+    if (e.key === " " && state.cur) { e.preventDefault(); autoStop(); readQuestion(); }
   });
 
   window.addEventListener("beforeunload", function () { TTS.stop(); wakeOff(); });
+
+  /* 화면에 보이는 문항 수는 전부 data.js 에서 세어 씁니다.
+     제목에 숫자를 적어 두면 data.js 만 옛 파일일 때 제목과 목록이 어긋납니다. */
+  (function stampCount() {
+    var n = ITEMS.length;
+    if ($("brandTitle")) $("brandTitle").textContent = "진로전담교사 심층면접 · " + n + "문항";
+    if ($("progressDen")) $("progressDen").textContent = "/" + n;
+    if ($("welcomeCount")) $("welcomeCount").textContent = n + "문항";
+    var last = ITEMS[n - 1];
+    document.title = "진로전담교사 심층면접 " + n + "문항";
+    try {
+      console.log("문항 수 " + n + " · 마지막 번호 " + (last ? last.no : "?") +
+                  " · 목록에 보이는 수와 다르면 data.js 가 옛 파일입니다");
+    } catch (e) { /* noop */ }
+  })();
 
   renderChips();
   renderList();
