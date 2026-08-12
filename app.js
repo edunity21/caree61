@@ -5,7 +5,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "v17";
+  var BUILD = "v18";
   var $ = function (id) { return document.getElementById(id); };
   try { console.log("진로전담교사 심층면접 · build " + BUILD + " · " + ITEMS.length + "문항"); } catch (e) {}
   var state = { grade: "all", area: "all", q: "", cur: null, done: loadDone() };
@@ -27,17 +27,94 @@
     onSeg: null, onDone: null, watch: null, startWatch: null, keep: null,
     parts: null, fromSeg: 0,
 
+    /* ── 발음이 뭉개지지 않게 하는 장치 ────────────────────
+       배속을 올리면 음성 엔진은 글자를 그대로 빨리 읽는 것이 아니라
+       음을 줄여 붙입니다. 아래 셋이 또렷함을 좌우합니다.
+         ① 읽히는 문장 자체를 다듬을 것   ② 조각을 적절한 길이로 끊을 것
+         ③ 기기에 설치된 음성을 쓸 것                                  */
+
+    /* ① 낭독 전용 다듬기 — 화면 글자는 그대로 두고 읽는 문장만 손봅니다.
+       낫표는 엔진에 따라 이름을 그대로 읽거나 그 자리에서 발음을 끊습니다.
+       가운뎃점은 배속이 올라가면 앞뒤 낱말이 한 낱말로 뭉치므로 쉼표로 바꿉니다. */
+    speech: function (text) {
+      return String(text)
+        /* 괄호 안의 원어는 소리로 들으면 흐름만 끊습니다. 한국어 설명만 남깁니다. */
+        .replace(/\(\s*[A-Za-z][A-Za-z\s.'-]*\)/g, "")
+        /* 괄호 안이 우리말이면 뜻이 담겨 있으므로 쉼표로 바꿔 살려 둡니다.
+           단, 닫는 괄호 뒤에 조사가 붙어 있으면 쉼표를 넣지 않습니다.
+           "집단상담(집단지도)의" 가 "집단지도, 의" 로 끊기면 조사가 홀로 남습니다. */
+        .replace(/\s*\(\s*/g, ", ")
+        .replace(/\s*\)(?=[가-힣])/g, "")
+        .replace(/\s*\)/g, ",")
+        /* 따옴표·낫표는 지우되 자리를 비우지 않습니다.
+           공백을 남기면 "진로교육법 에"처럼 조사가 떨어져 어색하게 끊깁니다. */
+        .replace(/[「」『』〈〉《》""'']/g, "")
+        /* 가운뎃점 — 두 가지를 나누어 다룹니다.
+           "중·고등학교" "시·도교육청" "서·논술형" 처럼 앞이 한 글자면 줄임말이므로
+           사람이 읽듯 붙여 읽습니다. 쉼표를 넣으면 없는 곳에서 끊어집니다.
+           "진로·진학" 처럼 낱말이 나열된 경우에만 쉼표로 바꿔 뭉치지 않게 합니다. */
+        .replace(/(^|[\s,.(])([가-힣])·(?=[가-힣])/g, "$1$2")
+        .replace(/(^|[\s,.(])([가-힣]{2})·(?=[가-힣])/g, function (m, a, b) {
+          return /^(초중|중고)$/.test(b) ? a + b : m;    /* "초·중·고" 처럼 이어진 경우 */
+        })
+        .replace(/\s*·\s*/g, ", ")
+        .replace(/\s*,(\s*[,.!?])/g, "$1")
+        .replace(/\s+([,.!?])/g, "$1")
+        .replace(/\s{2,}/g, " ")
+        .replace(/^[\s,]+/, "")
+        .trim();
+    },
+
+    /* 실제 낭독 속도를 재 둡니다. 음성마다 배속 반응이 달라서,
+       재 보지 않으면 조각 길이도 감시 시간도 어림짐작이 됩니다. */
+    meas: {},
+    record: function (r, len, ms) {
+      if (ms < 1200 || len < 20) return;   /* 너무 짧은 조각은 오차가 큽니다 */
+      var k = r.toFixed(2), m = this.meas[k] || (this.meas[k] = { n: 0, cps: 0 });
+      var c = len / (ms / 1000);
+      m.cps = m.n ? (m.cps * m.n + c) / (m.n + 1) : c;
+      m.n++;
+      if (typeof this.onMeas === "function") this.onMeas();
+    },
+    /* 배속을 걸지 않았을 때의 속도. 가장 낮은 배속에서 잰 값을 기준으로 삼습니다. */
+    baseCps: function () {
+      var best = null;
+      for (var k in this.meas) {
+        if (this.meas[k].n < 1) continue;
+        var r = parseFloat(k);
+        if (!best || r < best.r) best = { r: r, cps: this.meas[k].cps };
+      }
+      return best ? best.cps / best.r : 4.6;
+    },
+    cpsFor: function (r) {
+      var m = this.meas[r.toFixed(2)];
+      if (m && m.n >= 1) return m.cps;
+      return this.baseCps() * r;
+    },
+    /* 요청한 배속이 실제로 나오는지. 엔진이 상한을 두면 여기서 드러납니다. */
+    effective: function (r) {
+      var m = this.meas[r.toFixed(2)];
+      if (!m || m.n < 1) return null;
+      var base = this.baseCps();
+      return base > 0 ? m.cps / base : null;
+    },
+
     pickVoices: function () {
       if (!window.speechSynthesis) return;
       var v = speechSynthesis.getVoices().filter(function (x) {
         return /ko(-|_)?KR/i.test(x.lang) || /Korean|한국/i.test(x.name);
       });
       if (!v.length) return;
-      var male = v.filter(function (x) { return /InJoon|Male|남/i.test(x.name); });
-      var female = v.filter(function (x) { return /SunHi|Female|여|Yuna/i.test(x.name); });
-      this.voiceQ = male[0] || v[0];
-      this.voiceA = female[0] || v[v.length - 1] || v[0];
+      /* ③ 빠른 배속에서는 기기에 설치된 음성이 훨씬 또렷합니다.
+         내려받아 재생하는 음성은 배속을 올리면 끊기거나 뭉개집니다. */
+      var local = v.filter(function (x) { return x.localService; });
+      var pool = (this.rate >= 1.5 && local.length) ? local : v;
+      var male = pool.filter(function (x) { return /InJoon|Male|남/i.test(x.name); });
+      var female = pool.filter(function (x) { return /SunHi|Female|여|Yuna/i.test(x.name); });
+      this.voiceQ = male[0] || pool[0];
+      this.voiceA = female[0] || pool[pool.length - 1] || pool[0];
       this.list = v;
+      this.hasLocal = local.length > 0;
       var sel = $("voice");
       if (sel && sel.options.length !== v.length + 1) {
         var cur = sel.value;
@@ -51,12 +128,21 @@
       }
     },
 
+    /* ② 조각 길이는 글자 수가 아니라 걸리는 시간으로 정합니다.
+       한 발화가 15초쯤을 넘으면 크롬이 중간에 잘라 버리고,
+       반대로 너무 짧게 끊으면 이음매마다 끝음절이 씹힙니다.
+       배속이 오르면 같은 글자 수가 짧은 시간에 끝나므로 조각을 길게 잡습니다. */
     chunk: function (text) {
-      var LIM = this.rate > 1.2 ? 90 : (this.rate < 1 ? 60 : 75);
+      text = this.speech(text);
+      var cps = Math.max(this.cpsFor(this.rate), 2);
+      /* 문장을 이어 붙이는 기준은 11초, 쉼표에서 강제로 자르는 한계는 14초입니다.
+         한 발화가 15초를 넘으면 크롬이 도중에 끊어 버립니다. */
+      var LIM = Math.max(50, Math.min(140, Math.round(11 * cps)));
+      var HARD = Math.max(64, Math.min(170, Math.round(14 * cps)));
       var raw = text.match(/[^.!?]+[.!?]*\s*/g) || [text];
       var sentences = [];
       raw.forEach(function (s) {                    /* 긴 문장은 쉼표에서 한 번 더 */
-        if (s.length <= LIM + 25) { sentences.push(s); return; }
+        if (s.length <= HARD) { sentences.push(s); return; }
         var b = "";
         s.split(/,\s*/).forEach(function (p, i, arr) {
           p = p + (i < arr.length - 1 ? "," : "");
@@ -71,13 +157,29 @@
         else buf = buf ? buf + " " + s : s;
       });
       if (buf) out.push(buf);
-      return out;
+
+      /* 쉼표가 없는 긴 구절은 위에서 잘리지 않습니다.
+         마지막으로 낱말 사이에서만 끊어 한계 안에 들여놓습니다. 낱말 중간은 자르지 않습니다. */
+      var safe = [];
+      out.forEach(function (s) {
+        while (s.length > HARD) {
+          var cut = s.lastIndexOf(" ", HARD);
+          if (cut < HARD * 0.5) cut = s.indexOf(" ", HARD);   /* 띄어쓰기가 드물면 뒤쪽에서 */
+          if (cut < 0) break;
+          safe.push(s.slice(0, cut));
+          s = s.slice(cut + 1);
+        }
+        if (s) safe.push(s);
+      });
+      return safe;
     },
 
-    /* 한 구간의 예상 낭독 시간. 감시 타이머는 이 값을 넘길 때만 개입합니다. */
+    /* 한 구간의 예상 낭독 시간. 감시 타이머는 이 값을 넘길 때만 개입합니다.
+       엔진이 배속 상한을 두면 요청한 배속보다 느리게 읽으므로,
+       실제로 재 둔 속도를 씁니다. 어림짐작하면 아직 읽는 중인데 넘겨 버립니다. */
     est: function (text) {
-      var r = Math.max(this.rate || 1, 0.5);
-      return Math.max(3500, (text.length / (4.2 * r)) * 1000 + 3500);
+      var cps = Math.max(this.cpsFor(this.rate), 2);
+      return Math.max(3500, (text.length / cps) * 1000 + 3500);
     },
 
     /* 재생 세대(gen)를 하나 올려, 이전 발화가 뒤늦게 돌려주는 onend·onerror 를
@@ -154,7 +256,7 @@
       }
 
       var item = this.queue[this.idx], myIdx = this.idx, moved = false, started = false;
-      var retried = false, holds = 0;
+      var retried = false, holds = 0, t0 = 0;
 
       function talking() {
         try { return speechSynthesis.speaking || speechSynthesis.pending; } catch (e) { return false; }
@@ -193,11 +295,17 @@
         var u = new SpeechSynthesisUtterance(item.text);
         u.lang = "ko-KR";
         u.rate = self.rate;
-        u.pitch = item.who === "q" ? 0.95 : 1.02;
+        /* 배속을 올리면 소리가 가늘어져 자음이 묻힙니다.
+           음높이를 아주 조금 낮추면 같은 속도에서도 또렷하게 들립니다. */
+        var base = item.who === "q" ? 0.95 : 1.02;
+        u.pitch = self.rate >= 1.5 ? base - 0.05 : base;
         var v = item.who === "q" ? self.voiceQ : self.voiceA;
         if (v) u.voice = v;
-        u.onstart = function () { if (self.gen === myGen) armWatch(); };
-        u.onend = function () { advance(item.last ? 260 : 110); };
+        u.onstart = function () { if (self.gen === myGen) { t0 = Date.now(); armWatch(); } };
+        u.onend = function () {
+          if (t0) { self.record(self.rate, item.text.length, Date.now() - t0); t0 = 0; }
+          advance(item.last ? 260 : 110);
+        };
         u.onerror = function (e) {
           var why = e && e.error;
           if (why === "interrupted" || why === "canceled") return;  /* 우리가 멈춘 것입니다 */
@@ -728,8 +836,38 @@
     }
     TTS.play(parts.slice(from), TTS.onSeg, done);
   }
+  /* 요청한 배속과 실제로 나오는 배속은 다를 수 있습니다.
+     엔진마다 상한이 있어서, 2.0배를 걸어도 1.6배까지만 빨라지는 음성이 있습니다.
+     짐작으로 안내하지 않고 실제로 재서 알려 줍니다. */
+  function updateRateNote() {
+    var el = $("rateNote"); if (!el) return;
+    var r = parseFloat($("rate").value), msg = [];
+
+    if (r >= 1.5 && TTS.list && TTS.list.length && !TTS.hasLocal) {
+      msg.push("이 기기에는 내려받아 재생하는 한국어 음성만 있습니다. 빠른 배속에서 끊길 수 있습니다");
+    }
+    var eff = TTS.effective(r);
+    if (eff) {
+      var shown = Math.round(eff * 100) / 100;
+      if (eff < r * 0.9) {
+        msg.push("이 음성은 실제로 약 " + shown.toFixed(1) + "배까지만 빨라집니다");
+      } else if (r >= 1.5) {
+        msg.push("실제 " + shown.toFixed(1) + "배로 나오고 있습니다");
+      }
+    } else if (r >= 1.8) {
+      msg.push("한 번 낭독해 보면 이 음성이 실제로 몇 배까지 내는지 재서 알려 드립니다");
+    }
+
+    el.textContent = msg.join(" · ");
+    el.hidden = !msg.length;
+  }
+  TTS.onMeas = updateRateNote;
+
   $("rate").onchange = function () {
     TTS.rate = parseFloat(this.value);
+    /* 기본 음성을 쓰는 중이면, 빠른 배속에 맞는 음성으로 다시 고릅니다. */
+    if (!$("voice") || $("voice").value === "") TTS.pickVoices();
+    updateRateNote();
     restartSpeech();
   };
   if ($("voice")) $("voice").onchange = function () { applyVoice(); restartSpeech(); };
@@ -861,6 +999,10 @@
                   " · 목록에 보이는 수와 다르면 data.js 가 옛 파일입니다");
     } catch (e) { /* noop */ }
   })();
+
+  /* 시험용 통로 — 평소에는 아무 일도 하지 않습니다.
+     낭독 규칙을 브라우저 없이 점검할 때만 씁니다. */
+  if (typeof window.__TEST_HOOK === "function") window.__TEST_HOOK({ TTS: TTS, Auto: Auto });
 
   renderChips();
   renderList();
